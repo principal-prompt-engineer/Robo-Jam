@@ -15,11 +15,16 @@ const SCORE_UNIT=100;   // one point counts as this many "distance" units for Ad
 function opt(m,k,d){const o=CFG.opt[m.id];return o&&o[k]!=null?o[k]:d;}
 function setOpt(m,k,v){(CFG.opt[m.id]=CFG.opt[m.id]||{})[k]=v;saveCfg();}
 function lenIdx(m){return clamp(CFG.len[m.id]!=null?CFG.len[m.id]:m.lenDef,0,m.lens.length-1);}
-let bcOrder=[];   // the Boot Camp playlist: indexes into GAMES, shuffled once per series
+let bcOrder=[],bcKey='',bcPool=[];   // the playlist of the current series: indexes into GAMES, shuffled once per series
+const BUZZER_GAMES=GAMES.filter(g=>!g.shared),ARENA_GAMES=GAMES.filter(g=>g.shared);
 function shuffled(n,R){const a=[];for(let i=0;i<n;i++)a.push(i);for(let i=n-1;i>0;i--){const j=Math.floor(R()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
-function nextGameName(){return bcOrder.length&&series.round<series.n?GAMES[bcOrder[series.round%GAMES.length]].name:'';}
+function nextGameName(){return bcOrder.length&&series.round<series.n?bcPool[bcOrder[series.round%bcPool.length]].name:'';}
+function poolPick(id,pool,R){   // one game per round from a pool, every game once before any repeats
+  if(series.round<=1||!bcOrder.length||bcKey!==id){bcOrder=shuffled(pool.length,R);bcKey=id;bcPool=pool;}
+  return pool[bcOrder[(series.round-1)%pool.length]];
+}
 
-function mkMode(id,name,desc,lens,lenDef,pick){
+function mkMode(id,name,desc,lens,lenDef,pick,pool){
   return {id,name,desc,lens,lenDef,
   plan(R){
     const g=pick(R);G.game=g;G.zones=[];
@@ -28,11 +33,11 @@ function mkMode(id,name,desc,lens,lenDef,pick){
   fill(R){},
   spawn(k,n){return {x:0,y:0};},
   start(){
-    G.t=0;
+    G.t=0;G.parts=[];G.pops=[];G.shake=0;
     for(const c of players){c.score=0;c.lastT=0;c.finished=false;c.pose='idle';c.poseT=0;c.poseAge=0;c.fx=[];c.g=G.game.init(c);}
     flushEdges();
   },
-  tick(dt){G.t+=dt;},
+  tick(dt){G.t+=dt;if(G.game.world&&doneT<=0)G.game.world(dt);stepFx(dt);},
   touch(c,P,inp,dt){G.game.step(c,inp,dt,P);},
   over(humans){
     if(G.t>=G.len)return true;
@@ -57,14 +62,17 @@ function mkMode(id,name,desc,lens,lenDef,pick){
   options(){return [];},
   summary(){
     const l=[G.game.name+(series.n>1?'  ('+series.round+' of '+series.n+')':'')];
-    const nx=id==='bootcamp'?nextGameName():'';if(nx)l.push('Next up: '+nx);
+    const nx=pool?nextGameName():'';if(nx)l.push('Next up: '+nx);
     return l;},
   marks(){return [];},
   drawItems(x){}};
 }
 const MODES=[
- mkMode('bootcamp','Boot Camp: all games','A different robot challenge every round. Win the most points over the whole series to become Robot of the Month!',
-  [{n:'Short',v:0},{n:'Normal',v:1},{n:'Long',v:2}],1,
-  R=>{if(series.round<=1||!bcOrder.length)bcOrder=shuffled(GAMES.length,R);return GAMES[bcOrder[(series.round-1)%GAMES.length]];})
+ mkMode('bootcamp','Boot Camp: all games','A different challenge every round, buzzer games and shared-screen arena games mixed. Win the most points over the series to become Robot of the Month!',
+  [{n:'Short',v:0},{n:'Normal',v:1},{n:'Long',v:2}],1,R=>poolPick('bootcamp',GAMES,R),true),
+ mkMode('buzzer','Buzzer Rush: buzzer games','Only the six buzzer games: everyone has their own stage and a quick trigger finger.',
+  [{n:'Short',v:0},{n:'Normal',v:1},{n:'Long',v:2}],1,R=>poolPick('buzzer',BUZZER_GAMES,R),true),
+ mkMode('arena','Arena Bash: shared screen','Only the three arena games: everybody on one screen, bumping, painting and grabbing.',
+  [{n:'Short',v:0},{n:'Normal',v:1},{n:'Long',v:2}],1,R=>poolPick('arena',ARENA_GAMES,R),true)
 ].concat(GAMES.map(g=>mkMode(g.id,g.name,g.blurb,g.lens,g.lenDef,()=>g)));
 CFG.mode=clamp(CFG.mode|0,0,MODES.length-1);

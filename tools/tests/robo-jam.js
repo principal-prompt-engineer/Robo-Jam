@@ -4,7 +4,7 @@ step(5);tap('Enter');
 const setup=(mode,extra)=>{ev('toLobby()');step(3);ev('CFG.mode='+mode+';CFG.series=1;CFG.ai=1;slots[1]=null;slots[2]=null;'+(extra||'')+';buildWorld(true)');startPlay();};
 const me='players.find(c=>c.human)';
 const idx=id=>ev('MODES.findIndex(m=>m.id==="'+id+'")');
-assert(ev('GAMES.length')===6&&ev('MODES.length')===7,'six minigames plus Boot Camp');
+assert(ev('GAMES.length')===9&&ev('MODES.length')===12,'nine minigames (6 buzzer + 3 arena) plus Boot Camp, Buzzer Rush and Arena Bash');
 
 // ---- buzzer input: fresh presses are counted once
 ev('toLobby()');step(3);
@@ -74,6 +74,49 @@ setup(idx('catch'));
 ev('G.sched.unshift({t:0,lane:2,kind:"bolt",fall:.2},{t:0,lane:0,kind:"gear",fall:.2},{t:0,lane:2,kind:"spark",fall:.2});'+me+'.g.done={};'+me+'.g.lane=2;'+me+'.g.pos=2;'+me+'.score=5;');
 ev('G.t=.05');sim(.5);
 assert(ev(me+'.score')===5+1-2,'caught the bolt (+1), missed the gear in lane 0, zapped by the spark in lane 2 (-2)');
+
+// ---- shared-screen games: one pane for everybody, world step once per tick
+const stand=(id)=>{setup(idx(id),'CFG.ai=2');};
+const setPos=(i,x,y)=>ev('(()=>{const g=players['+i+'].g;g.x='+x+';g.y='+y+';g.vx=g.vy=0;})()');
+stand('bump');
+assert(ev('layoutPanes().length')===1&&ev('layoutPanes()[0].shared')===true&&ev('layoutPanes()[0].list.length')===3,'a shared game has ONE pane with every robot');
+assert(ev('mapJobs(layoutPanes()).length')===0,'no per-pane standings bars on a shared screen');
+setPos(0,800,450);setPos(1,1000,450);setPos(2,600,450);ev('players.forEach(c=>c.g.inv=0)');
+ev('players.forEach(c=>{c.score=0;c.g.fall=0})');setPos(0,800+420,450);ev('players[0].g.hitBy=players[1];players[0].g.hitT=3');sim(.05);
+assert(ev('players[0].g.fall')>0&&ev('players[1].score')===2,'bumper: falling off the platform gives the last robot that hit you +2');
+sim(1.4);assert(ev('players[0].g.fall')<=0&&ev('Math.hypot(players[0].g.x-800,players[0].g.y-450)')<380,'a robot that fell respawns on the platform');
+setPos(0,800,450);setPos(1,700,300);setPos(2,860,450);ev('players[0].g.cd=0;players[0].g.face=1;players[2].g.cd=9;players[0].g.stun=0;players[2].g.hitBy=null');
+press('Enter');sim(.3);
+assert(ev('players[2].g.x')>880||ev('players[2].g.stun')>0||ev('players[2].g.vx')>50,'a dash shoves the robot next to you');
+assert(ev('(()=>{const a=players.map(c=>[c.g.x,c.g.y]);sim=1;return a.every(p=>isFinite(p[0])&&isFinite(p[1]))})()'),'positions stay finite');
+stand('paint');
+assert(ev('G.tiles.length')===144,'paint: 16 x 9 tiles');
+setPos(0,150,150);ev('players[0].score=0;G.tiles.fill(-1)');sim(.1);
+assert(ev('players[0].score')>=1&&ev('G.tiles.filter(t=>t===players[0].ci).length')===ev('players[0].score'),'driving over a tile paints it, score = tiles owned');
+const ci1=ev('players[1].ci');setPos(1,150,150);ev('players[1].g.cd=0');sim(.1);
+assert(ev('players[0].score')===0||ev('G.tiles[0]')===ci1||ev('players[1].score')>=1,'painting over a rival takes the tile');
+ev('G.tiles.fill(-1);players.forEach(c=>c.score=0)');setPos(0,800,450);ev('players[0].g.cd=0');press('Enter');sim(.05);
+assert(ev('players[0].score')>=6,'paint bomb covers a patch ('+ev('players[0].score')+')');
+assert(ev('players[0].g.cd')>3,'the bomb recharges');
+stand('rush');
+setPos(0,400,300);ev('G.batts=[{x:400,y:300,v:3,ign:null,ignT:0}]');sim(.1);
+assert(ev('players[0].g.carry.join()')==='3','rush: walking over a battery picks it up (gold = 3)');
+const B=ev('players[0].g.base');setPos(0,B.x+130,B.y+130);sim(.1);
+assert(ev('players[0].score')===3&&ev('players[0].g.carry.length')===0,'banking at your own base scores the carried value');
+ev('players[1].g.carry=[1,1];players[0].g.cd=0');setPos(1,900,450);setPos(0,850,450);ev('players[0].g.face=1');
+press('Enter');sim(.12);
+assert(ev('players[1].g.carry.length')===0&&ev('G.batts.length')>=2,'dashing into a carrier makes them drop the batteries');
+ev('G.batts=[];players[0].g.carry=[1,1,1];');setPos(0,400,300);ev('G.batts=[{x:400,y:300,v:1,ign:null,ignT:0}]');sim(.1);
+assert(ev('players[0].g.carry.length')===3,'carry limit is 3');
+// ---- AI robots play every arena game without freezing
+for(const id of ['bump','paint','rush']){setup(idx(id),'CFG.ai=3');startPlay();sim(20);assert(ev('players.filter(c=>!c.human).every(c=>isFinite(c.g.x)&&isFinite(c.g.y))')&&ev('players.some(c=>c.score>0)'),id+': CPU robots move and score on their own');}
+// ---- pools
+setup(idx('arena'),'CFG.series=3;CFG.ai=1');startPlay();
+{const ids=[ev('G.game.id')];for(let r=2;r<=3;r++){ev("state='done';finishRound();resAge=9;");tap('Enter');ids.push(ev('G.game.id'));}
+ assert(new Set(ids).size===3&&ids.every(i=>['bump','paint','rush'].includes(i)),'Arena Bash plays the three arena games once each: '+ids.join());}
+setup(idx('buzzer'),'CFG.series=5;CFG.ai=1');startPlay();
+{const ids=[ev('G.game.id')];for(let r=2;r<=5;r++){ev("state='done';finishRound();resAge=9;");tap('Enter');ids.push(ev('G.game.id'));}
+ assert(ids.every(i=>!['bump','paint','rush'].includes(i)),'Buzzer Rush never picks an arena game: '+ids.join());}
 
 // ---- Boot Camp playlist: every game once per series, then repeat
 ev('toLobby()');step(3);ev('CFG.mode=0;CFG.series=5;CFG.ai=1;slots[1]=null;slots[2]=null;');

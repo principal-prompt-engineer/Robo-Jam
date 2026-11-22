@@ -1,5 +1,5 @@
 /* ---------- round state G (no scrolling world: every robot has its own stage, see skill 04 section 7) ---------- */
-const G={t:0,len:0,v:0,game:null,sched:null,items:[],rocks:[],zones:[],route:[],legLen:[],cum:[],total:0};
+const G={parts:[],pops:[],shake:0,arenaR:380,tiles:[],batts:[],nextSpawn:0,t:0,len:0,v:0,game:null,sched:null,items:[],rocks:[],zones:[],route:[],legLen:[],cum:[],total:0};
 let seed=1;
 function rnd(s){let a=s;return()=>{a=(a*16807)%2147483647;return(a-1)/2147483646;};}
 const curMode=()=>MODES[CFG.mode]||MODES[0];

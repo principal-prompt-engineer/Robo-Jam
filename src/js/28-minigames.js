@@ -359,6 +359,291 @@ const CATCH={id:'catch',name:'Cargo Catch',
   drawFx(c,rx,by-lw*.3,Math.min(26,b.w*.09));
  }};
 
+/* ===== SHARED-SCREEN ARENA GAMES =====
+   Same hook contract as the buzzer games, with three differences: shared:true, one common arena drawn by drawShared(b) instead of one stage per robot,
+   and a world(dt) hook that runs ONCE per tick (movement and collisions between robots). step() only stores the robot's input in c.g.in.
+   The arena is a fixed 1600 x 900 world scaled to the screen (arenaView). Controls: stick / arrows = move, big red button = special move. */
+const AW=1600,AH=900;
+function arenaView(b){
+  const top=Math.round(Math.max(b.h*.12,78)),s=Math.min(b.w/AW,(b.h-top)/AH),sh=G.shake||0;
+  return {s,ox:b.x+(b.w-AW*s)/2+(sh?(Math.random()-.5)*sh*16:0),oy:b.y+top+((b.h-top)-AH*s)/2+(sh?(Math.random()-.5)*sh*16:0)};
+}
+function burst(x,y,col,n,sp){for(let i=0;i<n;i++){const a=Math.random()*6.283,v=(.3+Math.random())*(sp||200);G.parts.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,life:.4+Math.random()*.4,t:0,col,r:3+Math.random()*4});}}
+function popAt(x,y,t,col){G.pops.push({x,y,t,col,a:0});}
+function stepFx(dt){
+  for(const p of G.parts){p.t+=dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.vx*=.96;p.vy*=.96;}
+  G.parts=G.parts.filter(p=>p.t<p.life);
+  for(const p of G.pops)p.a+=dt/1.1;
+  G.pops=G.pops.filter(p=>p.a<1);G.shake=Math.max(0,G.shake-dt*3);
+}
+function drawFxWorld(v){
+  for(const p of G.parts){ctx.globalAlpha=1-p.t/p.life;ctx.fillStyle=p.col;ctx.beginPath();ctx.arc(v.ox+p.x*v.s,v.oy+p.y*v.s,p.r*v.s*1.4,0,7);ctx.fill();}
+  ctx.globalAlpha=1;
+  for(const p of G.pops){ctx.globalAlpha=1-p.a*p.a;txt(p.t,v.ox+p.x*v.s,v.oy+(p.y-60-p.a*70)*v.s,Math.max(16,34*v.s),p.col,'center');}
+  ctx.globalAlpha=1;
+}
+function dirOf(inp){let x=inp.mx||0,y=inp.my||0;const m=Math.hypot(x,y);if(m>1){x/=m;y/=m;}return [x,y];}
+function walkMove(g,inp,dt,speed){   // direct, snappy movement for the walking arenas
+  const [mx,my]=dirOf(inp),k=Math.min(1,dt*10);
+  g.vx+=(mx*speed-g.vx)*k;g.vy+=(my*speed-g.vy)*k;g.x=clamp(g.x+g.vx*dt,34,AW-34);g.y=clamp(g.y+g.vy*dt,50,AH-24);
+  if(Math.abs(g.vx)>15)g.face=g.vx>0?1:-1;
+}
+function softPush(list,rr){
+  for(let i=0;i<list.length;i++)for(let j=i+1;j<list.length;j++){
+    const A=list[i].g,B=list[j].g;let dx=B.x-A.x,dy=B.y-A.y;const d=Math.hypot(dx,dy)||.01;
+    if(d<rr){const ov=(rr-d)/2;dx/=d;dy/=d;A.x-=dx*ov;A.y-=dy*ov;B.x+=dx*ov;B.y+=dy*ov;}
+  }
+}
+function arenaRobot(c,v,pose,o){
+  const g=c.g,S=100*v.s,sx=v.ox+g.x*v.s,sy=v.oy+g.y*v.s;
+  drawRobot(c,sx,sy,S,pose,{flip:g.face<0});
+  drawBadge(sx,sy-S*1.12,Math.max(5,S*.11),c);
+}
+const walkPose=g=>Math.hypot(g.vx,g.vy)>40?'run':'idle';
+function stubInp(g){return g.in||(g.in={mx:0,my:0,ok:0,l:0,r:0,u:0,d:0});}
+
+/* ---- 7. BUMPER BOTS: sumo on a shrinking platform ---- */
+const BUMP={id:'bump',name:'Bumper Bots',shared:true,
+ blurb:'Everyone shares one platform that keeps shrinking! Steer with the arrows and press the big button to DASH into rivals. Knock a robot off for +2. Falling costs 1.',
+ lens:[{n:'30 seconds',v:30},{n:'45 seconds',v:45},{n:'60 seconds',v:60}],lenDef:1,
+ init(c){
+  const i=players.indexOf(c),n=players.length,a=i/n*Math.PI*2-Math.PI/2;
+  return {x:800+Math.cos(a)*240,y:450+Math.sin(a)*240,vx:0,vy:0,dash:0,cd:0,hitBy:null,hitT:0,stun:0,fall:0,inv:1,face:1,in:{mx:0,my:0,ok:0},aiT:0,tgt:null,tgtD:999};
+ },
+ step(c,inp,dt,P){c.g.in=inp;},
+ world(dt){
+  const R=lerp(380,230,clamp(G.t/G.len,0,1)),cx=800,cy=450,live=[];G.arenaR=R;
+  for(const c of players){
+    const g=c.g,P=prm(c);
+    g.inv=Math.max(0,g.inv-dt);g.cd=Math.max(0,g.cd-dt);g.dash=Math.max(0,g.dash-dt);g.hitT=Math.max(0,g.hitT-dt);g.stun=Math.max(0,g.stun-dt);
+    if(g.fall>0){
+      g.fall-=dt;g.x+=g.vx*dt*.4;g.y+=g.vy*dt*.4;
+      if(g.fall<=0){const a=Math.random()*6.283;g.x=cx+Math.cos(a)*R*.5;g.y=cy+Math.sin(a)*R*.5;g.vx=g.vy=0;g.inv=1.8;g.hitBy=null;}
+      continue;
+    }
+    const inp=stubInp(g),[mx,my]=dirOf(inp);
+    if(g.stun<=0){g.vx+=mx*900*dt;g.vy+=my*900*dt;}
+    if(inp.ok>0&&g.cd<=0&&g.stun<=0){
+      let dx=mx,dy=my;if(!dx&&!dy){dx=g.face;dy=0;}const m=Math.hypot(dx,dy)||1;
+      g.vx+=dx/m*650*P.aid;g.vy+=dy/m*650*P.aid;g.dash=.28;g.cd=1.2;burst(g.x,g.y,'#ffffff',8,160);if(c.human)beep(520,.06);
+    }
+    inp.ok=0;
+    const damp=Math.exp(-2.6*dt);g.vx*=damp;g.vy*=damp;
+    const sp=Math.hypot(g.vx,g.vy);if(sp>700){g.vx*=700/sp;g.vy*=700/sp;}
+    g.x+=g.vx*dt;g.y+=g.vy*dt;if(Math.abs(g.vx)>15)g.face=g.vx>0?1:-1;
+    live.push(c);
+  }
+  for(let i=0;i<live.length;i++)for(let j=i+1;j<live.length;j++){
+    const a=live[i],b=live[j],A=a.g,B=b.g;let dx=B.x-A.x,dy=B.y-A.y;const d=Math.hypot(dx,dy)||.01,rr=64;
+    if(d>=rr)continue;
+    const nx=dx/d,ny=dy/d,ov=(rr-d)/2;A.x-=nx*ov;A.y-=ny*ov;B.x+=nx*ov;B.y+=ny*ov;
+    const vn=(B.vx-A.vx)*nx+(B.vy-A.vy)*ny;
+    if(vn<0){
+      const kA=.6+.4*prm(a).pen,kB=.6+.4*prm(b).pen,j2=-vn*.95;   // Tiny robots get knocked back less
+      A.vx-=nx*j2*kA;A.vy-=ny*j2*kA;B.vx+=nx*j2*kB;B.vy+=ny*j2*kB;
+      if(A.dash>0){B.vx+=nx*420*kB;B.vy+=ny*420*kB;B.hitBy=a;B.hitT=3;B.stun=.35;}
+      if(B.dash>0){A.vx-=nx*420*kA;A.vy-=ny*420*kA;A.hitBy=b;A.hitT=3;A.stun=.35;}
+      if(!A.dash&&!B.dash){A.hitBy=b;A.hitT=1.5;B.hitBy=a;B.hitT=1.5;}
+      const f=Math.min(1,-vn/500);G.shake=Math.max(G.shake,f*.6);burst((A.x+B.x)/2,(A.y+B.y)/2,'#ffe66d',6,150);
+      if(f>.3&&(a.human||b.human))beep(180,.08);
+    }
+  }
+  for(const c of live){
+    const g=c.g;
+    if(g.inv<=0&&Math.hypot(g.x-cx,g.y-cy)>R+8){
+      g.fall=1;burst(g.x,g.y,'#9fb3c8',10,200);
+      if(g.hitBy&&g.hitT>0){g.hitBy.score+=2;g.hitBy.lastT=G.t;popAt(g.x,g.y,'KO! +2',g.hitBy.color);if(g.hitBy.human)beep(880,.15);}
+      else popAt(g.x,g.y,'splash!','#cfe8ff');
+      c.score=Math.max(0,c.score-pen(prm(c),1));
+      if(c.human)beep(130,.25);
+    }
+  }
+ },
+ ai(c,dt,P){
+  const g=c.g,o=Object.assign({},NO_INPUT);
+  if(g.fall>0||g.stun>0)return o;
+  g.aiT-=dt;
+  if(g.aiT<=0){
+    g.aiT=.2+(1-c.skill)*.6;let best=null,bd=1e9;
+    for(const q of players){if(q===c||q.g.fall>0)continue;const d=Math.hypot(q.g.x-g.x,q.g.y-g.y);if(d<bd){bd=d;best=q;}}
+    g.tgt=best;g.tgtD=bd;
+  }
+  const R=G.arenaR||380,dc=Math.hypot(g.x-800,g.y-450);
+  let tx=800,ty=450;if(dc<=R-80&&g.tgt){tx=g.tgt.g.x;ty=g.tgt.g.y;}
+  const dx=tx-g.x,dy=ty-g.y,m=Math.hypot(dx,dy)||1;o.mx=dx/m;o.my=dy/m;
+  if(g.tgt&&dc<=R-80&&Math.hypot(g.tgt.g.x-g.x,g.tgt.g.y-g.y)<150&&g.cd<=0&&rand()<.05*c.skill)o.ok=1;
+  return o;
+ },
+ progress(c){return c.score*SCORE_UNIT;},
+ drawShared(b){
+  const v=arenaView(b),s=v.s,R=G.arenaR||380,px=v.ox+800*s,py=v.oy+450*s;
+  drawBackdrop(b.x,b.y,b.w,b.h);
+  ctx.fillStyle='rgba(0,0,0,.35)';ctx.beginPath();ctx.arc(px,py+14*s,(R+10)*s,0,7);ctx.fill();
+  ctx.fillStyle='#31457f';ctx.strokeStyle='#4cc9f0';ctx.lineWidth=Math.max(3,6*s);ctx.beginPath();ctx.arc(px,py,R*s,0,7);ctx.fill();ctx.stroke();
+  ctx.strokeStyle='rgba(255,255,255,.12)';ctx.lineWidth=2;
+  for(let k=1;k<4;k++){ctx.beginPath();ctx.arc(px,py,R*s*k/4,0,7);ctx.stroke();}
+  for(let k=0;k<8;k++){const a=k*Math.PI/4;ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(px+Math.cos(a)*R*s,py+Math.sin(a)*R*s);ctx.stroke();}
+  for(const c of players.slice().sort((a,b)=>a.g.y-b.g.y)){
+    const g=c.g,f=g.fall>0?g.fall:1,S=100*s;
+    ctx.save();if(g.fall>0)ctx.globalAlpha=Math.max(0,f);
+    const pose=g.fall>0?'zap':g.stun>0?'dizzy':g.dash>0?'power':walkPose(g);
+    drawRobot(c,v.ox+g.x*s,v.oy+g.y*s+(g.fall>0?(1-f)*S*.5:0),S*(g.fall>0?.45+.55*f:1),pose,{flip:g.face<0});
+    ctx.restore();
+    if(g.fall<=0){drawBadge(v.ox+g.x*s,v.oy+g.y*s-S*1.12,Math.max(5,S*.11),c);
+      if(g.inv>0&&Math.floor(animClock*8)%2){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(v.ox+g.x*s,v.oy+g.y*s-S*.45,S*.45,S*.6,0,0,7);ctx.stroke();}}
+  }
+  drawFxWorld(v);
+ }};
+
+/* ---- 8. PAINT PANIC: paint the floor, hold the most tiles ---- */
+const PAINT={id:'paint',name:'Paint Panic',
+ shared:true,
+ blurb:'Drive over the floor tiles to paint them your colour, and paint over your rivals! The big button throws a paint bomb (it recharges). Most tiles wins.',
+ lens:[{n:'30 seconds',v:30},{n:'45 seconds',v:45},{n:'60 seconds',v:60}],lenDef:1,
+ plan(R,v){G.tiles=new Array(144).fill(-1);return null;},
+ init(c){
+  const P4=[[250,200],[1350,200],[250,700],[1350,700]],p=P4[players.indexOf(c)%4];
+  return {x:p[0],y:p[1],vx:0,vy:0,face:1,cd:0,in:{mx:0,my:0,ok:0},aiT:0,tx:p[0],ty:p[1]};
+ },
+ step(c,inp,dt,P){c.g.in=inp;},
+ paint(c,x,y,rad){
+  let n=0;
+  for(let r=Math.floor((y-rad)/100);r<=Math.floor((y+rad)/100);r++)for(let cc=Math.floor((x-rad)/100);cc<=Math.floor((x+rad)/100);cc++){
+    if(cc<0||cc>15||r<0||r>8||Math.hypot(cc*100+50-x,r*100+50-y)>rad)continue;
+    const k=r*16+cc,o=G.tiles[k];if(o===c.ci)continue;
+    if(o>=0){const op=players.find(q=>q.ci===o);if(op)op.score--;}
+    G.tiles[k]=c.ci;c.score++;c.lastT=G.t;n++;
+  }
+  return n;
+ },
+ world(dt){
+  const live=[];
+  for(const c of players){
+    const g=c.g,P=prm(c),inp=stubInp(g);
+    g.cd=Math.max(0,g.cd-dt);
+    walkMove(g,inp,dt,250*Math.pow(P.aid,.4));
+    if(PAINT.paint(c,g.x,g.y,58*P.win)&&c.human&&Math.random()<.3)beep(300+Math.random()*200,.02);
+    if(inp.ok>0&&g.cd<=0){PAINT.paint(c,g.x,g.y,175);g.cd=6;burst(g.x,g.y,c.color,22,320);G.shake=Math.max(G.shake,.4);if(c.human)beep(260,.15);}
+    inp.ok=0;live.push(c);
+  }
+  softPush(live,60);
+ },
+ ai(c,dt,P){
+  const g=c.g,o=Object.assign({},NO_INPUT);g.aiT-=dt;
+  if(g.aiT<=0){
+    g.aiT=.35+(1-c.skill)*.5;let bs=1e9;
+    for(let i=0;i<14;i++){const k=Math.floor(rand()*144),tx=(k%16)*100+50,ty=Math.floor(k/16)*100+50,sc=Math.hypot(tx-g.x,ty-g.y)+(G.tiles[k]===c.ci?600:0);if(sc<bs){bs=sc;g.tx=tx;g.ty=ty;}}
+    if(g.cd<=0){let n=0;for(let r=0;r<9;r++)for(let cc=0;cc<16;cc++)if(Math.hypot(cc*100+50-g.x,r*100+50-g.y)<=175&&G.tiles[r*16+cc]!==c.ci)n++;g.bomb=n>=6;}
+  }
+  const dx=g.tx-g.x,dy=g.ty-g.y,m=Math.hypot(dx,dy)||1;o.mx=dx/m;o.my=dy/m;
+  if(g.bomb&&g.cd<=0){o.ok=1;g.bomb=false;}
+  return o;
+ },
+ progress(c){return c.score*SCORE_UNIT/6;},
+ status(c){return c.score+(c.score===1?' tile':' tiles');},
+ resultText(c){return c.score+(c.score===1?' tile':' tiles');},
+ drawShared(b){
+  const v=arenaView(b),s=v.s;
+  drawBackdrop(b.x,b.y,b.w,b.h);
+  for(let r=0;r<9;r++)for(let cc=0;cc<16;cc++){
+    const o=G.tiles[r*16+cc];
+    ctx.fillStyle=o>=0?COLORS[o%8]:((r+cc)%2?'#1c2a50':'#17223f');
+    if(o>=0)ctx.globalAlpha=.88;
+    ctx.fillRect(v.ox+cc*100*s,v.oy+r*100*s,100*s+.5,100*s+.5);ctx.globalAlpha=1;
+  }
+  ctx.strokeStyle='rgba(0,0,0,.25)';ctx.lineWidth=1;
+  for(let k=0;k<=16;k++){ctx.beginPath();ctx.moveTo(v.ox+k*100*s,v.oy);ctx.lineTo(v.ox+k*100*s,v.oy+AH*s);ctx.stroke();}
+  for(let k=0;k<=9;k++){ctx.beginPath();ctx.moveTo(v.ox,v.oy+k*100*s);ctx.lineTo(v.ox+AW*s,v.oy+k*100*s);ctx.stroke();}
+  for(const c of players.slice().sort((a,b)=>a.g.y-b.g.y)){
+    const g=c.g;
+    if(g.cd<=0){ctx.strokeStyle='#fff';ctx.globalAlpha=.4+.4*Math.sin(animClock*8);ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(v.ox+g.x*s,v.oy+g.y*s,34*s,12*s,0,0,7);ctx.stroke();ctx.globalAlpha=1;}
+    arenaRobot(c,v,walkPose(g));
+  }
+  drawFxWorld(v);
+ }};
+
+/* ---- 9. BATTERY RUSH: grab batteries, bank them at your base, bump rivals to make them drop theirs ---- */
+const RUSH={id:'rush',name:'Battery Rush',
+ shared:true,
+ blurb:'Grab batteries (gold = 3) and carry up to three back to your corner base to score. Press the big button to DASH into a rival and make them drop everything!',
+ lens:[{n:'30 seconds',v:30},{n:'45 seconds',v:45},{n:'60 seconds',v:60}],lenDef:1,
+ BASES:[{x:0,y:0},{x:1340,y:0},{x:0,y:640},{x:1340,y:640}],
+ plan(R,v){G.batts=[];G.nextSpawn=.6;return null;},
+ init(c){
+  const i=players.indexOf(c)%4,B=RUSH.BASES[i];
+  return {x:B.x+130,y:B.y+130,vx:0,vy:0,face:1,base:B,carry:[],cd:0,dash:0,stun:0,in:{mx:0,my:0,ok:0},aiT:0,tx:800,ty:450};
+ },
+ step(c,inp,dt,P){c.g.in=inp;},
+ world(dt){
+  G.nextSpawn-=dt;
+  if(G.nextSpawn<=0&&G.batts.length<8){
+    G.batts.push({x:340+Math.random()*920,y:90+Math.random()*720,v:Math.random()<.2?3:1,ign:null,ignT:0});G.nextSpawn=1.1;
+  }
+  for(const b of G.batts)b.ignT=Math.max(0,b.ignT-dt);
+  const live=[];
+  for(const c of players){
+    const g=c.g,P=prm(c),inp=stubInp(g);
+    g.cd=Math.max(0,g.cd-dt);g.dash=Math.max(0,g.dash-dt);g.stun=Math.max(0,g.stun-dt);
+    if(g.stun<=0)walkMove(g,inp,dt,(g.dash>0?520:240)*Math.pow(P.aid,.4)*(1-.06*g.carry.length));
+    else{g.vx*=.9;g.vy*=.9;}
+    if(inp.ok>0&&g.cd<=0&&g.stun<=0){
+      let [dx,dy]=dirOf(inp);if(!dx&&!dy){dx=g.face;dy=0;}const m=Math.hypot(dx,dy)||1;
+      g.vx=dx/m*520;g.vy=dy/m*520;g.dash=.25;g.cd=1.4;burst(g.x,g.y,'#fff',6,140);if(c.human)beep(520,.06);
+    }
+    inp.ok=0;
+    for(let i=G.batts.length-1;i>=0;i--){   // pick up
+      const b=G.batts[i];
+      if(g.stun>0||g.carry.length>=3||(b.ign===c&&b.ignT>0))continue;
+      if(Math.hypot(b.x-g.x,b.y-g.y)<46*P.win){g.carry.push(b.v);G.batts.splice(i,1);if(c.human)beep(700,.04);}
+    }
+    if(g.carry.length&&g.x>g.base.x&&g.x<g.base.x+260&&g.y>g.base.y&&g.y<g.base.y+260){   // bank
+      const sum=g.carry.reduce((a,b)=>a+b,0);c.score+=sum;c.lastT=G.t;popAt(g.x,g.y,'+'+sum,c.color);burst(g.x,g.y,'#ffe66d',14,260);g.carry=[];if(c.human)beep(880,.15);
+    }
+    live.push(c);
+  }
+  for(const c of live){   // dash hits a carrier: they drop everything
+    const g=c.g;if(g.dash<=0)continue;
+    for(const q of live){
+      if(q===c||q.g.stun>0||!q.g.carry.length||Math.hypot(q.g.x-g.x,q.g.y-g.y)>66)continue;
+      const prot=prm(q).pen===0&&Math.random()<.5;   // Tiny robots sometimes keep one
+      for(const v of q.g.carry.splice(prot?1:0))G.batts.push({x:q.g.x+(Math.random()-.5)*120,y:q.g.y+(Math.random()-.5)*120,v,ign:q,ignT:1.2});
+      q.g.stun=.6;q.g.vx=g.vx*.6;q.g.vy=g.vy*.6;popAt(q.g.x,q.g.y,'DROP!','#ffffff');G.shake=Math.max(G.shake,.5);burst(q.g.x,q.g.y,'#ffe66d',12,260);if(q.human)beep(160,.2);
+    }
+  }
+  softPush(live,60);
+ },
+ ai(c,dt,P){
+  const g=c.g,o=Object.assign({},NO_INPUT);if(g.stun>0)return o;
+  g.aiT-=dt;
+  if(g.aiT<=0){
+    g.aiT=.3+(1-c.skill)*.5;const home=g.carry.length>=3||(g.carry.length>0&&(!G.batts.length||G.t>G.len-6||g.carry.length>=2&&rand()<.5));
+    if(home){g.tx=g.base.x+130;g.ty=g.base.y+130;}
+    else{let bs=1e9;for(const b of G.batts){const sc=Math.hypot(b.x-g.x,b.y-g.y)-b.v*70;if(sc<bs){bs=sc;g.tx=b.x;g.ty=b.y;}}if(bs===1e9){g.tx=800;g.ty=450;}}
+  }
+  const dx=g.tx-g.x,dy=g.ty-g.y,m=Math.hypot(dx,dy)||1;o.mx=dx/m;o.my=dy/m;
+  if(g.cd<=0)for(const q of players){if(q===c||!q.g.carry.length)continue;const d=Math.hypot(q.g.x-g.x,q.g.y-g.y);if(d<130&&(q.g.carry.length>=2||rand()<.3)&&rand()<.1*c.skill){o.ok=1;o.mx=(q.g.x-g.x)/d;o.my=(q.g.y-g.y)/d;break;}}
+  return o;
+ },
+ progress(c){return c.score*SCORE_UNIT;},
+ status(c){return c.score+(c.score===1?' battery':' batteries');},
+ resultText(c){return c.score+(c.score===1?' battery':' batteries');},
+ drawShared(b){
+  const v=arenaView(b),s=v.s;
+  drawBackdrop(b.x,b.y,b.w,b.h);
+  ctx.fillStyle='rgba(23,34,63,.9)';ctx.fillRect(v.ox,v.oy,AW*s,AH*s);
+  ctx.strokeStyle='rgba(255,255,255,.07)';ctx.lineWidth=1;
+  for(let k=0;k<=16;k++){ctx.beginPath();ctx.moveTo(v.ox+k*100*s,v.oy);ctx.lineTo(v.ox+k*100*s,v.oy+AH*s);ctx.stroke();}
+  for(let k=0;k<=9;k++){ctx.beginPath();ctx.moveTo(v.ox,v.oy+k*100*s);ctx.lineTo(v.ox+AW*s,v.oy+k*100*s);ctx.stroke();}
+  players.forEach((c)=>{const B=c.g.base;ctx.fillStyle=c.color;ctx.globalAlpha=.28;ctx.fillRect(v.ox+B.x*s,v.oy+B.y*s,260*s,260*s);ctx.globalAlpha=.9;ctx.strokeStyle=c.color;ctx.lineWidth=Math.max(2,4*s);ctx.strokeRect(v.ox+B.x*s,v.oy+B.y*s,260*s,260*s);ctx.globalAlpha=1;});
+  const batt=(x,y,val,sc)=>{const w=26*sc,h=40*sc;if(val>1)glow(x,y,h*.9,'#ffd23f',.35);rrect(x-w/2,y-h/2,w,h,5*sc,val>1?'#ffd23f':'#7dff9b','#19131c',2.5);ctx.fillStyle='#19131c';ctx.fillRect(x-w*.22,y-h/2-4*sc,w*.44,4*sc);txt('\u26A1',x,y+h*.2,h*.55,'rgba(16,21,28,.7)','center',false);};
+  for(const bt of G.batts)batt(v.ox+bt.x*s,v.oy+bt.y*s+Math.sin(animClock*4+bt.x)*3*s,bt.v,s*1.1);
+  for(const c of players.slice().sort((a,b)=>a.g.y-b.g.y)){
+    const g=c.g;arenaRobot(c,v,g.stun>0?'dizzy':g.dash>0?'power':walkPose(g));
+    g.carry.forEach((val,i)=>batt(v.ox+g.x*s+(i-(g.carry.length-1)/2)*30*s,v.oy+g.y*s-150*s,val,s*.8));
+  }
+  drawFxWorld(v);
+ }};
+
 /* ---- shared defaults so a game only has to define what is special ---- */
 const GAME_DEF={cap:v=>v,bestHigh:true,plan:()=>null,
  status(c){return c.score+(c.score===1?' pt':' pts');},
@@ -369,4 +654,4 @@ const GAME_DEF={cap:v=>v,bestHigh:true,plan:()=>null,
  progress(c){return c.score*SCORE_UNIT;},
  maxProgress(){let m=8*SCORE_UNIT;for(const c of players)m=Math.max(m,c.prog*1.15);return m;},
  barEnd(){return String(Math.round(this.maxProgress()/SCORE_UNIT));}};
-const GAMES=[BOLT,SURGE,DASH,STAMP,COPY,CATCH].map(g=>Object.assign({},GAME_DEF,g));
+const GAMES=[BOLT,SURGE,DASH,STAMP,COPY,CATCH,BUMP,PAINT,RUSH].map(g=>Object.assign({},GAME_DEF,g));

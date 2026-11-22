@@ -55,6 +55,7 @@ function drawBackdrop(x,y,w,h){
   ctx.fillStyle='rgba(255,255,255,.1)';ctx.fillRect(x,y+h*.86,w,2);
 }
 function drawStage(p){
+  if(p.shared){G.game.drawShared({x:0,y:0,w:VW,h:VH});return;}
   const c=p.list[0],hs=CFG.hud*(p.w<500?.85:1);
   ctx.save();ctx.beginPath();ctx.rect(p.x,p.y,p.w,p.h);ctx.clip();
   drawBackdrop(p.x,p.y,p.w,p.h);
@@ -90,7 +91,13 @@ function playerLines(c,st,x,y,hs){
   txt(lvLabel(c),x+14,y+22*hs,14*hs,c.lv===LV_ADAPTIVE&&c.assist>.02?THEME.help:THEME.info);
   txt(`${ordinal(pl)} / ${players.length}   ${curMode().status(c)}`,x+14,y+42*hs,15*hs,THEME.text);
 }
+function drawSharedHUD(st){
+  const hs=CFG.hud*(VW<900?.85:1),m=curMode(),n=players.length;
+  players.forEach((c,i)=>{ctx.save();ctx.beginPath();ctx.rect(i*VW/n,0,VW/n,80*hs+8);ctx.clip();playerLines(c,st,i*VW/n+8,30*hs,hs);ctx.restore();});
+  if(state!=='lobby')txt(m.top(),VW/2,VH-14,30*hs,'#fff','center');
+}
 function drawPaneHUD(p,st){
+  if(p.shared){drawSharedHUD(st);return;}
   const hs=CFG.hud*(p.w<500?.85:1),m=curMode(),c=p.list[0];
   ctx.save();ctx.beginPath();ctx.rect(p.x,p.y,p.w,p.h);ctx.clip();ctx.translate(p.x,p.y);
   if(c)playerLines(c,st,12,30*hs,hs);

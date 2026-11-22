@@ -21,8 +21,13 @@ Every player has the big red button (**OK**) and four coloured buttons (**left, 
 | Stamp Press | stop a marker in the green zone with the big button (middle = 3 points) |
 | Copy Circuit | repeat a growing light pattern (Simon says) |
 | Cargo Catch | slide along five lanes, catch bolts and gold gears, dodge sparks |
+| **Bumper Bots** (shared screen) | sumo on a shrinking platform: dash into rivals, KO = +2, falling = -1; you respawn, nobody is eliminated |
+| **Paint Panic** (shared screen) | drive over tiles to paint them, paint over rivals, paint bomb on the big button; most tiles wins |
+| **Battery Rush** (shared screen) | grab batteries (gold = 3), bank up to 3 at your corner base, dash into a carrier to make them drop everything |
 
-**Boot Camp** plays a different game each round (Rounds = 1, 3 or 5 games, never repeating within a series) and hands out rank points to every robot, CPUs included; the last results screen crowns the Robot of the Month. Each game can also be played on its own (Game row in the lobby). Length (Short / Normal / Long) changes the time, track or number of stamps.
+The three **shared-screen** games put everybody in one arena (stick or arrows to move, big red button for the special move). They use the existing sprite poses (run is flipped to face left or right; dizzy, power and zap show hits, dashes and falls), so they need no new art. Buzzer games give every robot its own stage.
+
+**Boot Camp** plays a different game each round from all nine (Rounds = 1, 3 or 5 games, never repeating within a series). **Buzzer Rush** uses only the six buzzer games and **Arena Bash** only the three arena games and hands out rank points to every robot, CPUs included; the last results screen crowns the Robot of the Month. Each game can also be played on its own (Game row in the lobby). Length (Short / Normal / Long) changes the time, track or number of stamps.
 
 ## Difficulty (`LEVELS` in `src/js/10-levels-profiles.js`)
 Tiny / Easy / Normal / Pro / Adaptive change four numbers: `win` (size of hit windows), `slow` (speed of targets), `pen` (penalties) and `aid` (power per press). Adaptive blends Normal towards Tiny for whoever trails the leader (`ADAPT.FULL_GAP` is in progress units, 100 = one point).
@@ -37,7 +42,7 @@ The game runs without any art: the robots are drawn in code (`procRobot` in `src
 To change poses or frames edit the table in `tools/make_sprite_guides.py` and rerun it (it regenerates the guide, prompts and spec).
 
 ## Layout of the code
-`00-core` constants / config, `10-levels-profiles` difficulty + Adaptive, `20-world` round plan, **`28-minigames` the six games**, **`30-modes` Boot Camp + mode wrappers**, `40-audio-devices` input (buzzer edges), `50-lobby-settings`, `60-play` round loop + results, `70-layout-maps` one stage per robot + standings bars, `76-robot` robot art, `80-draw` stages / HUD / menus, `90-main` loop. Tests: `tools/tests/shell.js` (shell) and `tools/tests/robo-jam.js` (game rules). The `skills/` folder is the unchanged template documentation.
+`00-core` constants / config, `10-levels-profiles` difficulty + Adaptive, `20-world` round plan, **`28-minigames` the nine games**, **`30-modes` Boot Camp + mode wrappers**, `40-audio-devices` input (buzzer edges), `50-lobby-settings`, `60-play` round loop + results, `70-layout-maps` one stage per robot + standings bars, `76-robot` robot art, `80-draw` stages / HUD / menus, `90-main` loop. Tests: `tools/tests/shell.js` (shell) and `tools/tests/robo-jam.js` (game rules). The `skills/` folder is the unchanged template documentation.
 
 ## Adding a minigame
-Add an object to `GAMES` in `28-minigames.js` (id, name, blurb, lens, plan, init, step, ai, draw; see the comment at the top), add it to the array at the bottom, and it appears in the lobby and in Boot Camp. Add a test next to the others.
+Add an object to `GAMES` in `28-minigames.js` (id, name, blurb, lens, plan, init, step, ai, draw; see the comment at the top). For a shared-screen game set `shared:true`, add `world(dt)` (runs once per tick: movement and collisions) and `drawShared(b)`; copy Bumper Bots as a starting point, add it to the array at the bottom, and it appears in the lobby and in Boot Camp. Add a test next to the others.

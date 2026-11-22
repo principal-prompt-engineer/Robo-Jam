@@ -19,6 +19,7 @@ function splitDims(n,screen){
 /* Skill 04 section 7 (non-spatial): one pane per ROBOT (humans and CPUs), no camera. */
 function layoutPanes(){
   const list=players;
+  if(list.length&&state!=='lobby'&&G.game&&G.game.shared)return [{x:0,y:0,w:VW,h:VH,list,focus:null,c:null,shared:true}];   // shared-screen game: one arena for everybody
   if(!list.length)return [{x:0,y:0,w:VW,h:VH,list:[],focus:null,c:null}];
   const one=c=>({x:0,y:0,w:VW,h:VH,list:[c],focus:c.human?c:null,c});
   if(list.length===1)return [one(list[0])];
@@ -65,7 +66,7 @@ function drawMark(x,y,r,c,focus){
   if(focus){shapePath(x,y,r+3,identShape()?c.ci:0);ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();}
 }
 function mapJobs(panes){                  // [{kind,rect,focus,clip}] to draw this frame
-  const kind=CFG.map;if(kind==='off')return [];
+  const kind=CFG.map;if(kind==='off'||(panes[0]&&panes[0].shared))return [];
   if(CFG.mapScope==='shared'&&panes.length>1)return [{kind,rect:sharedMapRect(kind,panes),focus:null,clip:null}];
   return panes.map(p=>({kind,rect:paneMapRect(kind,p),focus:p.focus,clip:p}));
 }

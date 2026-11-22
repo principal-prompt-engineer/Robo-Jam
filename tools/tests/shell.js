@@ -2,6 +2,7 @@
 const h=require('./_harness')(process.argv[2]);const {ev,step,key,tap,assert,sim,startPlay,store}=h;
 
 step(5);
+ev('CFG.mode=Math.max(0,MODES.findIndex(m=>m.id==="bolt"))');   // Robo Jam: a per-robot-stage game, so stage counts are predictable (Boot Camp picks a random game)
 assert(ev('state')==='lobby','starts in lobby');
 assert(ev('MODES.length')>=1,'at least one game mode registered');
 const HOOKS=['plan','fill','spawn','start','tick','touch','over','aiTarget','progress','maxProgress','status','top','banner','rank','resultText','bestOf','drawItems','marks','barEnd','options','summary'];
