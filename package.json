@@ -1,0 +1,11 @@
+{
+  "name": "robo-jam",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Robo Jam: demo game and shell for the game-template skills",
+  "scripts": {
+    "build": "node tools/build.js",
+    "test": "node tools/build.js --test",
+    "shots": "node tools/shots.js"
+  }
+}
